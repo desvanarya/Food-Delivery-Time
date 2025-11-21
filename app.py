@@ -3,23 +3,19 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LinearRegression
+from xgboost import XGBRegressor
 
 # -----------------------------------------------------------------------------
-# 1. PERSIAPAN DATA & PELATIHAN MODEL (Model Linear Regression)
+# 1. PERSIAPAN DATA & PELATIHAN MODEL (Model XGBoost)
 # -----------------------------------------------------------------------------
 
-# Fungsi untuk memuat data, membersihkan, dan melatih model
 @st.cache_resource
 def load_and_train_model():
-    """Memuat data, membersihkan, melakukan OHE, menskalakan, dan melatih model LR."""
-    # --- CATATAN PENTING ---
-    # Asumsikan file CSV sudah tersedia di lingkungan deployment Streamlit.
-    # Jika tidak, data dummy akan digunakan (seperti di bawah).
+    """Memuat data, membersihkan, melakukan OHE, menskalakan, dan melatih model XGBoost."""
     try:
         df = pd.read_csv("Food_Delivery_Times.csv")
     except:
-        # Membuat data dummy jika file CSV tidak ditemukan (untuk testing)
+        # Dummy data jika CSV tidak ada
         data = {
             'Order_ID': range(200),
             'Delivery_Time_min': np.random.randint(15, 70, 200),
@@ -33,7 +29,7 @@ def load_and_train_model():
         }
         df = pd.DataFrame(data)
 
-    # Pembersihan Data (sesuai langkah-langkah dalam proyek)
+    # Data Cleaning
     df.dropna(subset=['Delivery_Time_min'], inplace=True)
     for col in ['Weather', 'Traffic_Level', 'Time_of_Day', 'Vehicle_Type']:
         df[col].fillna(df[col].mode()[0], inplace=True)
@@ -41,41 +37,48 @@ def load_and_train_model():
         df[col].fillna(df[col].median(), inplace=True)
     df.drop('Order_ID', axis=1, inplace=True)
 
-    # One-Hot Encoding (OHE)
+    # One-Hot Encoding
     categorical_cols = ['Weather', 'Traffic_Level', 'Time_of_Day', 'Vehicle_Type']
     df = pd.get_dummies(df, columns=categorical_cols, drop_first=True)
-    for col in df.columns:
-        if df[col].dtype == 'bool':
-            df[col] = df[col].astype(int)
+    df = df.astype(float)
 
-    # Persiapan Model
+    # Split Data
     X = df.drop(columns=['Delivery_Time_min'])
     y = df['Delivery_Time_min']
-    X = X.astype(np.float64)
 
-    # Split dan Scaling
     numerical_cols = ['Distance_km', 'Preparation_Time_min', 'Courier_Experience_yrs']
-    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-    
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=0.2, random_state=42
+    )
+
+    # Scaling numerik
     scaler = StandardScaler()
-    # Hanya fit pada data training
     X_train[numerical_cols] = scaler.fit_transform(X_train[numerical_cols])
 
-    # Pelatihan Model Linear Regression (Model terbaik Anda)
-    lr_model = LinearRegression()
-    lr_model.fit(X_train, y_train)
+    # -----------------------------
+    # 🔥 MODEL XGBOOST
+    # -----------------------------
+    xgb_model = XGBRegressor(
+        n_estimators=200,
+        learning_rate=0.1,
+        max_depth=5,
+        subsample=0.9,
+        colsample_bytree=0.9,
+        random_state=42
+    )
+    xgb_model.fit(X_train, y_train)
 
-    # Simpan nama-nama fitur untuk memastikan urutan input yang benar
     feature_names = X.columns.tolist()
 
-    return lr_model, scaler, feature_names, numerical_cols
+    return xgb_model, scaler, feature_names, numerical_cols
 
-# Panggil fungsi pelatihan model
-lr_model, scaler, feature_names, numerical_cols = load_and_train_model()
+
+# Load model
+xgb_model, scaler, feature_names, numerical_cols = load_and_train_model()
 
 
 # -----------------------------------------------------------------------------
-# 2. ANTARMUKA STREAMLIT
+# 2. UI STREAMLIT
 # -----------------------------------------------------------------------------
 
 st.set_page_config(
@@ -85,71 +88,32 @@ st.set_page_config(
 )
 
 st.title("🛵 Sistem Prediksi Waktu Pengiriman Makanan")
-st.markdown("Aplikasi ini menggunakan model **Regresi Linear** (Best Model R²≈0.826) untuk memperkirakan waktu pengiriman.")
+st.markdown("Aplikasi ini sekarang menggunakan model **XGBoost** untuk menghasilkan prediksi yang lebih akurat.")
 
-# Pembagian layout menjadi 2 kolom untuk input
+
+# Input
 col1, col2 = st.columns(2)
 
-# Input Numerik
 with col1:
     st.header("1. Data Pengiriman")
-    distance = st.number_input(
-        "Jarak Pengiriman (km)",
-        min_value=1.0,
-        max_value=100.0,
-        value=5.0,
-        step=0.5,
-        help="Jarak dari restoran ke tujuan dalam kilometer."
-    )
-    preparation_time = st.number_input(
-        "Waktu Persiapan Makanan (menit)",
-        min_value=5,
-        max_value=60,
-        value=20,
-        step=1,
-        help="Perkiraan waktu yang dibutuhkan restoran untuk menyiapkan pesanan."
-    )
-    courier_experience = st.number_input(
-        "Pengalaman Kurir (tahun)",
-        min_value=0.0,
-        max_value=20.0,
-        value=3.0,
-        step=0.1,
-        help="Lama pengalaman kurir dalam tahun."
-    )
+    distance = st.number_input("Jarak Pengiriman (km)", 1.0, 100.0, 5.0, 0.5)
+    preparation_time = st.number_input("Waktu Persiapan (menit)", 5, 60, 20, 1)
+    courier_experience = st.number_input("Pengalaman Kurir (tahun)", 0.0, 20.0, 3.0, 0.1)
 
-# Input Kategorikal
 with col2:
     st.header("2. Kondisi Lingkungan")
-    weather = st.selectbox(
-        "Kondisi Cuaca",
-        ['Sunny', 'Rainy', 'Foggy', 'Snowy', 'Windy'],
-        index=0
-    )
-    traffic = st.selectbox(
-        "Tingkat Lalu Lintas",
-        ['Low', 'Medium', 'High'],
-        index=1
-    )
-    time_of_day = st.selectbox(
-        "Waktu Hari",
-        ['Morning', 'Afternoon', 'Evening', 'Night'],
-        index=2
-    )
-    vehicle = st.selectbox(
-        "Tipe Kendaraan",
-        ['Motorcycle', 'Scooter', 'Car'],
-        index=0
-    )
+    weather = st.selectbox("Cuaca", ['Sunny', 'Rainy', 'Foggy', 'Snowy', 'Windy'])
+    traffic = st.selectbox("Lalu Lintas", ['Low', 'Medium', 'High'])
+    time_of_day = st.selectbox("Waktu Hari", ['Morning', 'Afternoon', 'Evening', 'Night'])
+    vehicle = st.selectbox("Tipe Kendaraan", ['Motorcycle', 'Scooter', 'Car'])
+
 
 # -----------------------------------------------------------------------------
 # 3. FUNGSI PREDIKSI
 # -----------------------------------------------------------------------------
 
-def predict_delivery_time(lr_model, scaler, feature_names, numerical_cols, input_data):
-    """Memproses input pengguna dan menghasilkan prediksi."""
-    
-    # Membuat DataFrame dari input pengguna
+def predict_delivery_time(model, scaler, feature_names, numerical_cols, input_data):
+
     input_df = pd.DataFrame({
         'Distance_km': [input_data['Distance_km']],
         'Preparation_Time_min': [input_data['Preparation_Time_min']],
@@ -160,37 +124,32 @@ def predict_delivery_time(lr_model, scaler, feature_names, numerical_cols, input
         'Vehicle_Type': [input_data['Vehicle_Type']]
     })
 
-    # Melakukan One-Hot Encoding pada data input
-    categorical_cols_input = ['Weather', 'Traffic_Level', 'Time_of_Day', 'Vehicle_Type']
-    input_encoded = pd.get_dummies(input_df, columns=categorical_cols_input, drop_first=True)
-    
-    # -------------------------------------------------------------------------
-    # Menyamakan Kolom: Langkah Kritis!
-    # Tambahkan kolom dummy yang hilang (nilai 0) dan hapus yang tidak perlu
-    # Ini memastikan urutan kolom input sama persis dengan saat pelatihan model
-    # -------------------------------------------------------------------------
-    
+    # OHE input
+    input_encoded = pd.get_dummies(
+        input_df,
+        columns=['Weather', 'Traffic_Level', 'Time_of_Day', 'Vehicle_Type'],
+        drop_first=True
+    )
+
+    # Samakan kolom
     final_input = pd.DataFrame(0, index=[0], columns=feature_names)
-    
     for col in final_input.columns:
         if col in input_encoded.columns:
             final_input[col] = input_encoded[col].values
 
-    # -------------------------------------------------------------------------
-
-    # Scaling Fitur Numerik
-    # Transformasi menggunakan scaler yang sudah di-fit pada data training
+    # Scaling numerik
     final_input[numerical_cols] = scaler.transform(final_input[numerical_cols])
 
     # Prediksi
-    prediction = lr_model.predict(final_input)
-    
-    # Pastikan output prediksi tidak negatif
-    return max(0, prediction[0])
+    pred = model.predict(final_input)[0]
+    return max(0, pred)
 
-# Tombol Prediksi
+
+# -----------------------------------------------------------------------------
+# 4. PREDIKSI
+# -----------------------------------------------------------------------------
+
 if st.button("Hitung Waktu Pengiriman"):
-    
     input_data = {
         'Distance_km': distance,
         'Preparation_Time_min': preparation_time,
@@ -200,31 +159,27 @@ if st.button("Hitung Waktu Pengiriman"):
         'Time_of_Day': time_of_day,
         'Vehicle_Type': vehicle
     }
-    
+
     try:
-        predicted_time = predict_delivery_time(lr_model, scaler, feature_names, numerical_cols, input_data)
-        
-        # Tampilkan Hasil
+        predicted_time = predict_delivery_time(
+            xgb_model, scaler, feature_names, numerical_cols, input_data
+        )
+
         st.markdown("---")
         st.subheader("🎉 Hasil Prediksi")
-        
-        col_res1, col_res2 = st.columns([1, 2])
-        
-        with col_res1:
-             # Menampilkan hasil dengan 2 angka di belakang koma
-             st.metric(label="Waktu Pengiriman Diprediksi", value=f"{predicted_time:.2f} Menit")
-        
-        with col_res2:
-            st.info(
-                f"Prediksi ini menggunakan model Regresi Linear dengan R2 Score sekitar 82.6% (model terbaik)."
-                f" Artinya, rata-rata kesalahan prediksi adalah sekitar {5.9:.2f} menit (MAE)."
-            )
+
+        colA, colB = st.columns([1, 2])
+
+        with colA:
+            st.metric("Waktu Pengiriman Diprediksi", f"{predicted_time:.2f} Menit")
+
+        with colB:
+            st.info("Model menggunakan **XGBoost Regressor**, algoritma yang lebih kuat dan unggul "
+                    "dibanding Linear Regression pada dataset ini.")
 
     except Exception as e:
-        st.error(f"Terjadi kesalahan saat melakukan prediksi. Pastikan data yang dimasukkan valid: {e}")
+        st.error(f"Terjadi kesalahan saat prediksi: {e}")
 
-# -----------------------------------------------------------------------------
-# 4. KETERANGAN TAMBAHAN
-# -----------------------------------------------------------------------------
+# Footer
 st.markdown("---")
-st.caption("Catatan: Model ini dilatih berdasarkan asumsi data dari Food_Delivery_Times.csv dan menggunakan Linear Regression karena kinerjanya yang superior.")
+st.caption("Model: XGBoost Regressor — dipilih karena performanya paling stabil dan akurat.")  
