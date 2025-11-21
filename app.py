@@ -3,19 +3,19 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
-from xgboost import XGBRegressor
+from sklearn.linear_model import LinearRegression
 
 # -----------------------------------------------------------------------------
-# 1. PERSIAPAN DATA & PELATIHAN MODEL (Model XGBoost)
+# 1. PERSIAPAN DATA & PELATIHAN MODEL (MODEL LINEAR REGRESSION)
 # -----------------------------------------------------------------------------
 
 @st.cache_resource
 def load_and_train_model():
-    """Memuat data, membersihkan, melakukan OHE, menskalakan, dan melatih model XGBoost."""
+    """Memuat data, cleaning, OHE, scaling, dan melatih Linear Regression."""
     try:
         df = pd.read_csv("Food_Delivery_Times.csv")
     except:
-        # Dummy data jika CSV tidak ada
+        # Dummy data jika file tidak ada
         data = {
             'Order_ID': range(200),
             'Delivery_Time_min': np.random.randint(15, 70, 200),
@@ -35,6 +35,7 @@ def load_and_train_model():
         df[col].fillna(df[col].mode()[0], inplace=True)
     for col in ['Courier_Experience_yrs', 'Distance_km', 'Preparation_Time_min']:
         df[col].fillna(df[col].median(), inplace=True)
+
     df.drop('Order_ID', axis=1, inplace=True)
 
     # One-Hot Encoding
@@ -56,25 +57,18 @@ def load_and_train_model():
     X_train[numerical_cols] = scaler.fit_transform(X_train[numerical_cols])
 
     # -----------------------------
-    # 🔥 MODEL XGBOOST
+    # ⭐ MODEL LINEAR REGRESSION
     # -----------------------------
-    xgb_model = XGBRegressor(
-        n_estimators=200,
-        learning_rate=0.1,
-        max_depth=5,
-        subsample=0.9,
-        colsample_bytree=0.9,
-        random_state=42
-    )
-    xgb_model.fit(X_train, y_train)
+    model = LinearRegression()
+    model.fit(X_train, y_train)
 
     feature_names = X.columns.tolist()
 
-    return xgb_model, scaler, feature_names, numerical_cols
+    return model, scaler, feature_names, numerical_cols
 
 
 # Load model
-xgb_model, scaler, feature_names, numerical_cols = load_and_train_model()
+model, scaler, feature_names, numerical_cols = load_and_train_model()
 
 
 # -----------------------------------------------------------------------------
@@ -88,7 +82,8 @@ st.set_page_config(
 )
 
 st.title("🛵 Sistem Prediksi Waktu Pengiriman Makanan")
-st.markdown("Aplikasi ini sekarang menggunakan model **XGBoost** untuk menghasilkan prediksi yang lebih akurat.")
+st.markdown("Aplikasi ini sekarang menggunakan model **Linear Regression**, "
+            "yang terbukti menjadi model paling akurat pada dataset ini.")
 
 
 # Input
@@ -162,7 +157,7 @@ if st.button("Hitung Waktu Pengiriman"):
 
     try:
         predicted_time = predict_delivery_time(
-            xgb_model, scaler, feature_names, numerical_cols, input_data
+            model, scaler, feature_names, numerical_cols, input_data
         )
 
         st.markdown("---")
@@ -174,12 +169,12 @@ if st.button("Hitung Waktu Pengiriman"):
             st.metric("Waktu Pengiriman Diprediksi", f"{predicted_time:.2f} Menit")
 
         with colB:
-            st.info("Model menggunakan **XGBoost Regressor**, algoritma yang lebih kuat dan unggul "
-                    "dibanding Linear Regression pada dataset ini.")
+            st.info("Model menggunakan **Linear Regression**, model paling stabil dan akurat "
+                    "untuk dataset ini dibanding algoritma kompleks seperti Random Forest atau XGBoost.")
 
     except Exception as e:
         st.error(f"Terjadi kesalahan saat prediksi: {e}")
 
 # Footer
 st.markdown("---")
-st.caption("Model: XGBoost Regressor — dipilih karena performanya paling stabil dan akurat.")  
+st.caption("Model: Linear Regression — dipilih karena performanya paling tinggi pada dataset.")
